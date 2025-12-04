@@ -20,12 +20,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Buat folder uploads kalau belum ada
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
-
 // Gunakan semua routes
 app.use('/api', authRoutes);
 app.use('/api', userRoutes);
@@ -37,9 +31,6 @@ app.use('/api', ratingRoutes);
 app.use('/api', komentarRoutes);
 app.use('/api', laporanKomentarRoutes); 
 app.use('/api/rekomendasi', sistemRekomendasiRoutes);
-
-// Static file untuk akses gambar, dll
-app.use('/uploads', express.static(uploadsDir));
 
 // Jalankan server
 app.listen(3000, () => {
