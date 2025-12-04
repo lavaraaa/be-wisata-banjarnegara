@@ -5,12 +5,9 @@ const router   = express.Router();
 const authenticate = require('../middleware/authenticateToken');
 const ratingCtrl   = require('../controllers/ratingController');
 
-const storage = multer.diskStorage({
-  destination: (_,__,cb) => cb(null, 'uploads/ulasan'),
-  filename   : (_,file,cb) => cb(null, Date.now() + path.extname(file.originalname))
-});
-
+const storage = multer.memoryStorage(); 
 const upload = multer({ storage });
+
 router.post(  '/user/rating', authenticate, upload.array('images', 3), ratingCtrl.createRating);
 router.put(   '/user/rating/:id', authenticate, upload.array('images', 3), ratingCtrl.updateRating);
 router.get('/rating/:wisata_id', ratingCtrl.getAllByWisata);
