@@ -93,7 +93,7 @@ exports.updatePhoto = [
       if (!req.file) return res.status(400).json({ message: 'File foto tidak ditemukan.' });
 
       try {
-        // 1. Ambil foto lama
+        // 1. Ambil foto lama dari DB
         const [results] = await new Promise((resolve, reject) => {
           db.query('SELECT photoURL FROM users WHERE id = ?', [userId], (err, results) => {
             if (err) reject(err); else resolve([results]);
@@ -101,16 +101,12 @@ exports.updatePhoto = [
         });
 
         const oldPhotoURL = results[0]?.photoURL;
-
         if (oldPhotoURL) {
-          // CONVERT URL KE PATH SUPABASE
-          const fullPath = oldPhotoURL.split('/object/public/')[1]; 
-          // fullPath = "images/fotoprofil/xxx.jpg"
-
-          const cleanPath = fullPath.replace('images/', '');  
-          // cleanPath = "fotoprofil/xxx.jpg"
-
-          await supabase.storage.from('images').remove([cleanPath]);
+          const oldFileName = oldPhotoURL.split('/fotoprofil/')[1];
+          if (oldFileName) {
+            // Hapus foto lama dari Supabase
+            await supabase.storage.from('images').remove([`fotoprofil/${oldFileName}`]);
+          }
         }
 
         // 2. Upload foto baru
@@ -121,9 +117,10 @@ exports.updatePhoto = [
 
         if (uploadError) throw uploadError;
 
+        // 3. Ambil public URL
         const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(fileName);
 
-        // 3. Update DB
+        // 4. Update DB
         db.query('UPDATE users SET photoURL = ? WHERE id = ?', [publicUrl, userId], (err) => {
           if (err) return res.status(500).json({ message: 'Gagal update foto.' });
           res.json({ message: 'Foto profil berhasil diperbarui.', photoURL: publicUrl });
@@ -137,7 +134,7 @@ exports.updatePhoto = [
   }
 ];
 
-
+// ====================== DELETE FOTO ======================
 exports.deletePhoto = (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ message: 'Token tidak ada.' });
@@ -147,6 +144,7 @@ exports.deletePhoto = (req, res) => {
 
     const userId = decoded.id;
 
+    // Ambil URL foto dari DB
     db.query('SELECT photoURL FROM users WHERE id = ?', [userId], async (err, results) => {
       if (err || results.length === 0) {
         return res.status(500).json({ message: 'Gagal mencari data foto user.' });
@@ -155,23 +153,21 @@ exports.deletePhoto = (req, res) => {
       const photoURL = results[0].photoURL;
       if (!photoURL) return res.status(400).json({ message: 'Foto tidak ditemukan.' });
 
+      // Ambil nama file dari URL
+      // Misal: https://<project>.supabase.co/storage/v1/object/public/images/fotoprofil/1691212345678_avatar.jpg
+      const fileName = photoURL.split('/fotoprofil/')[1];
+      if (!fileName) return res.status(400).json({ message: 'File tidak valid.' });
+
       try {
-        // Convert URL Supabase ke path yang Supabase mau
-        const fullPath = photoURL.split('/object/public/')[1];
-        // "images/fotoprofil/xxx.jpg"
-
-        const cleanPath = fullPath.replace('images/', '');
-        // "fotoprofil/xxx.jpg"
-
-        const { error } = await supabase.storage.from('images').remove([cleanPath]);
-
+        // Hapus file di Supabase
+        const { data, error } = await supabase.storage.from('images').remove([`fotoprofil/${fileName}`]);
         if (error) console.warn('Gagal hapus file Supabase:', error.message);
 
+        // Update DB jadi null
         db.query('UPDATE users SET photoURL = NULL WHERE id = ?', [userId], (err) => {
           if (err) return res.status(500).json({ message: 'Gagal update database.' });
           res.json({ message: 'Foto berhasil dihapus.' });
         });
-
       } catch (err) {
         console.error(err);
         res.status(500).json({ message: 'Gagal hapus foto.', error: err.message });
@@ -179,8 +175,6 @@ exports.deletePhoto = (req, res) => {
     });
   });
 };
-
-
 exports.getUserWisataById = (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ message: 'ID user tidak ditemukan' });
