@@ -27,4 +27,6 @@ app.use('/api', komentarRoutes);
 app.use('/api', laporanKomentarRoutes);
 app.use('/api/rekomendasi', sistemRekomendasiRoutes);
 
-module.exports = app;
+module.exports = (req, res) => {
+  return app(req, res);
+};
