@@ -1,7 +1,9 @@
 const mysql = require('mysql2');
-require('dotenv').config();
 
-const connection = mysql.createConnection(process.env.DB_URL);
+const connection = mysql.createConnection({
+  uri: process.env.DB_URL,
+  ssl: { rejectUnauthorized: false } // sementara untuk tes
+});
 
 connection.connect((err) => {
   if (err) {
