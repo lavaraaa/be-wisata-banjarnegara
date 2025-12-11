@@ -27,21 +27,34 @@ const parseKategori = (kategori) => {
   }
 };
 
-exports.getCBF = (req, res) => {
+exports.getCBF = async (req, res) => {
   const { userId } = req.params;
 
-  const sqlAll = `
-      SELECT 
+  try {
+    // OPTIMIZED QUERY - Single query with all data
+    const sqlAll = `
+      SELECT
         w.*,
-        (SELECT COUNT(*) FROM likes l WHERE l.wisata_id = w.id) AS total_likes,
-        (SELECT COUNT(*) FROM favorit f WHERE f.wisata_id = w.id) AS total_favorit,
-        (SELECT COALESCE(AVG(r.rating),0) FROM rating r WHERE r.wisata_id = w.id) AS average_rating
+        COALESCE(l.total_likes, 0) AS total_likes,
+        COALESCE(f.total_favorit, 0) AS total_favorit,
+        COALESCE(r.average_rating, 0) AS average_rating,
+        ur.rating AS user_rating
       FROM wisata w
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_likes FROM likes GROUP BY wisata_id
+      ) l ON w.id = l.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_favorit FROM favorit GROUP BY wisata_id
+      ) f ON w.id = f.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, AVG(rating) as average_rating FROM rating GROUP BY wisata_id
+      ) r ON w.id = r.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, rating FROM rating WHERE user_id = ?
+      ) ur ON w.id = ur.wisata_id
     `;
 
-
-  db.query(sqlAll, [userId], (err, allWisata) => {
-    if (err) return res.status(500).json({ message: 'Error fetch wisata' });
+    const [allWisata] = await db.query(sqlAll, [userId]);
 
     // Ambil history user rating >=4
     const sqlHistory = `
@@ -52,87 +65,99 @@ exports.getCBF = (req, res) => {
       ORDER BY r.rating DESC, r.created_at DESC
     `;
 
-  db.query(sqlHistory, [userId, userId, userId], (err2, userHistory) => { 
-      if (err2) return res.status(500).json({ message: 'Error fetch user history' });
+    const [userHistory] = await db.query(sqlHistory, [userId]);
 
-      if (!userHistory.length) {
-        // user baru → top 8 by popularity
-        const top8 = allWisata
-          .map(w => {
-            const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.user_rating || 0);
-            return { ...w, totalScore: popularityScore };
-          })
-          .sort((a, b) => b.totalScore - a.totalScore)
-          .slice(0, 8);
-        return res.json(top8);
-      }
+    if (!userHistory.length) {
+      // user baru → top 8 by popularity
+      const top8 = allWisata
+        .map(w => {
+          const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.user_rating || 0);
+          return { ...w, totalScore: popularityScore };
+        })
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .slice(0, 8);
+      return res.json(top8);
+    }
 
-      // parse kategori user history
-      const userHistoryKategori = userHistory.map(h => parseKategori(h.kategori));
+    // parse kategori user history
+    const userHistoryKategori = userHistory.map(h => parseKategori(h.kategori));
 
-      // Hitung skor wisata
-      let scoredWisata = allWisata.map(w => {
-        let cbfScore = 0;
-        const wKategori = parseKategori(w.kategori);
+    // Hitung skor wisata
+    let scoredWisata = allWisata.map(w => {
+      let cbfScore = 0;
+      const wKategori = parseKategori(w.kategori);
 
-        // cek judul → dominan
-        const wJudul = (w.judul || '').toLowerCase().split(' ');
-        userHistory.forEach(h => {
-          const hJudul = (h.judul || '').toLowerCase().split(' ');
-          const judulSim = wJudul.filter(word => hJudul.includes(word)).length;
-          cbfScore += judulSim * 5; // judul lebih dominan
-        });
-
-        // cek kategori → tambahan
-        let matched = false;
-        userHistoryKategori.forEach(hKategori => {
-          const commonKategori = wKategori.filter(k => hKategori.includes(k)).length;
-          if (commonKategori > 0) {
-            cbfScore += commonKategori * 3; // kategori tambahan
-            matched = true;
-          }
-        });
-
-        // popularity = like + favorit + rating user sendiri
-        const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.user_rating || 0);
-
-        return { ...w, cbfScore, popularityScore, totalScore: cbfScore + popularityScore, matched };
+      // cek judul → dominan
+      const wJudul = (w.judul || '').toLowerCase().split(' ');
+      userHistory.forEach(h => {
+        const hJudul = (h.judul || '').toLowerCase().split(' ');
+        const judulSim = wJudul.filter(word => hJudul.includes(word)).length;
+        cbfScore += judulSim * 5; // judul lebih dominan
       });
 
-      // pool → semua wisata yang relevan
-      let pool = scoredWisata.filter(w => w.totalScore > 0);
+      // cek kategori → tambahan
+      let matched = false;
+      userHistoryKategori.forEach(hKategori => {
+        const commonKategori = wKategori.filter(k => hKategori.includes(k)).length;
+        if (commonKategori > 0) {
+          cbfScore += commonKategori * 3; // kategori tambahan
+          matched = true;
+        }
+      });
 
-      // jika pool <8 → tambahkan wisata lain by totalScore
-      if (pool.length < 8) {
-        const extra = scoredWisata
-          .filter(w => !pool.includes(w))
-          .sort((a, b) => b.totalScore - a.totalScore)
-          .slice(0, 8 - pool.length);
-        pool = pool.concat(extra);
-      }
+      // popularity = like + favorit + rating user sendiri
+      const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.user_rating || 0);
 
-      // urutkan pool by totalScore
-      pool.sort((a, b) => b.totalScore - a.totalScore);
-
-      // ROTASI 2–3 refresh
-      if (!global.cbfState) global.cbfState = {};
-      const stateKey = `cbf_${userId}`;
-      if (!global.cbfState[stateKey]) global.cbfState[stateKey] = { shift: 0, count: 0 };
-
-      let { shift, count } = global.cbfState[stateKey];
-      count++;
-      if (count > 2) { // 2–3 refresh baru geser
-        count = 0;
-        shift = (shift + 3) % pool.length; // geser 3 wisata setiap rotasi
-      }
-      global.cbfState[stateKey].shift = shift;
-      global.cbfState[stateKey].count = count;
-
-      // ambil 8 card untuk FE
-      const rotated = pool.slice(shift).concat(pool.slice(0, shift));
-      const result = rotated.slice(0, 8);
-
-      res.json(result);
+      return { ...w, cbfScore, popularityScore, totalScore: cbfScore + popularityScore, matched };
     });
-  });
+
+    // pool → semua wisata yang relevan
+    let pool = scoredWisata.filter(w => w.totalScore > 0);
+
+    // jika pool <8 → tambahkan wisata lain by totalScore
+    if (pool.length < 8) {
+      const extra = scoredWisata
+        .filter(w => !pool.includes(w))
+        .sort((a, b) => b.totalScore - a.totalScore)
+        .slice(0, 8 - pool.length);
+      pool = pool.concat(extra);
+    }
+
+    // urutkan pool by totalScore
+    pool.sort((a, b) => b.totalScore - a.totalScore);
+
+    // ROTASI 2–3 refresh - WITH MEMORY LEAK FIX
+    if (!global.cbfState) {
+      global.cbfState = new Map();
+      global.cbfStateMaxSize = 100; // max 100 users
+    }
+
+    // Cleanup old entries if exceeds max size
+    if (global.cbfState.size > global.cbfStateMaxSize) {
+      const firstKey = global.cbfState.keys().next().value;
+      global.cbfState.delete(firstKey);
+    }
+
+    const stateKey = `cbf_${userId}`;
+    if (!global.cbfState.has(stateKey)) {
+      global.cbfState.set(stateKey, { shift: 0, count: 0 });
+    }
+
+    let { shift, count } = global.cbfState.get(stateKey);
+    count++;
+    if (count > 2) { // 2–3 refresh baru geser
+      count = 0;
+      shift = (shift + 3) % pool.length; // geser 3 wisata setiap rotasi
+    }
+    global.cbfState.set(stateKey, { shift, count });
+
+    // ambil 8 card untuk FE
+    const rotated = pool.slice(shift).concat(pool.slice(0, shift));
+    const result = rotated.slice(0, 8);
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error fetch CBF:', err);
+    res.status(500).json({ message: 'Error fetch CBF', error: err.message });
+  }
 };

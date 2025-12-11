@@ -31,68 +31,82 @@ const parseKategori = (kategori) => {
 // Normalisasi judul
 const normalizeWords = (str) => (str || '').toLowerCase().replace(/[^a-z0-9\s]/gi,'').split(' ');
 
-exports.getCBFbyWisata = (req, res) => {
-  const { wisataId } = req.params;
-  if (!wisataId) return res.status(400).json({ message: 'wisataId required' });
+exports.getCBFbyWisata = async (req, res) => {
+  try {
+    const { wisataId } = req.params;
+    if (!wisataId) return res.status(400).json({ message: 'wisataId required' });
 
-  // Ambil semua wisata kecuali referensi
-  const sqlAll = `
-    SELECT 
-      w.*,
-      (SELECT COUNT(*) FROM likes l WHERE l.wisata_id = w.id) AS total_likes,
-      (SELECT COUNT(*) FROM favorit f WHERE f.wisata_id = w.id) AS total_favorit,
-      (SELECT COALESCE(AVG(r.rating),0) FROM rating r WHERE r.wisata_id = w.id) AS avg_rating
-    FROM wisata w
-    WHERE w.id != ?
-  `;
+    // OPTIMIZED QUERY - Use LEFT JOIN instead of subquery
+    const sqlAll = `
+      SELECT
+        w.*,
+        COALESCE(l.total_likes, 0) AS total_likes,
+        COALESCE(f.total_favorit, 0) AS total_favorit,
+        COALESCE(r.avg_rating, 0) AS avg_rating
+      FROM wisata w
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_likes FROM likes GROUP BY wisata_id
+      ) l ON w.id = l.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_favorit FROM favorit GROUP BY wisata_id
+      ) f ON w.id = f.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, AVG(rating) as avg_rating FROM rating GROUP BY wisata_id
+      ) r ON w.id = r.wisata_id
+      WHERE w.id != ?
+    `;
 
-  db.query(sqlAll, [wisataId], (err, allWisata) => {
-    if (err) return res.status(500).json({ message: 'Error fetch wisata' });
+    const [allWisata] = await db.query(sqlAll, [wisataId]);
 
     // Ambil referensi wisata
     const sqlRef = `SELECT * FROM wisata WHERE id = ?`;
-    db.query(sqlRef, [wisataId], (err2, refRows) => {
-      if (err2 || !refRows.length) return res.status(500).json({ message: 'Error fetch ref wisata' });
+    const [refRows] = await db.query(sqlRef, [wisataId]);
 
-      const refWisata = refRows[0];
-      const refKategori = parseKategori(refWisata.kategori);
-      const refJudulWords = normalizeWords(refWisata.judul);
+    if (!refRows.length) {
+      return res.status(404).json({ message: 'Wisata referensi tidak ditemukan' });
+    }
 
-      // Hitung skor kemiripan + popularity
-      const scored = allWisata.map(w => {
-        const wKategori = parseKategori(w.kategori);
-        const wJudulWords = normalizeWords(w.judul);
+    const refWisata = refRows[0];
+    const refKategori = parseKategori(refWisata.kategori);
+    const refJudulWords = normalizeWords(refWisata.judul);
 
-        const judulSim = wJudulWords.filter(word => refJudulWords.includes(word)).length;
-        const kategoriSim = wKategori.filter(k => refKategori.includes(k)).length;
+    // Hitung skor kemiripan + popularity
+    const scored = allWisata.map(w => {
+      const wKategori = parseKategori(w.kategori);
+      const wJudulWords = normalizeWords(w.judul);
 
-        const similarityScore = judulSim * 5 + kategoriSim * 3;
-        const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.avg_rating || 0);
+      const judulSim = wJudulWords.filter(word => refJudulWords.includes(word)).length;
+      const kategoriSim = wKategori.filter(k => refKategori.includes(k)).length;
 
-        return { ...w, similarityScore, popularityScore, totalScore: similarityScore + popularityScore };
-      });
+      const similarityScore = judulSim * 5 + kategoriSim * 3;
+      const popularityScore = (w.total_likes || 0) + (w.total_favorit || 0) + (w.avg_rating || 0);
 
-      // Filter relevan
-      let pool = scored.filter(w => w.similarityScore > 0);
-
-      // Jika kurang dari 8, ambil sisanya dari pool tertinggi
-      if (pool.length < 8) {
-        const extra = scored
-          .filter(w => !pool.includes(w))
-          .sort((a,b) => b.totalScore - a.totalScore)
-          .slice(0, 8 - pool.length);
-        pool = pool.concat(extra);
-      }
-
-      // Urutkan pool by totalScore
-      pool.sort((a,b) => b.totalScore - a.totalScore);
-
-      // ROTASI hasil tiap request supaya beda tiap refresh
-      const shift = Math.floor(Math.random() * pool.length);
-      const rotated = pool.slice(shift).concat(pool.slice(0, shift));
-      const result = rotated.slice(0, 8);
-
-      res.json(result);
+      return { ...w, similarityScore, popularityScore, totalScore: similarityScore + popularityScore };
     });
-  });
+
+    // Filter relevan
+    let pool = scored.filter(w => w.similarityScore > 0);
+
+    // Jika kurang dari 8, ambil sisanya dari pool tertinggi
+    if (pool.length < 8) {
+      const extra = scored
+        .filter(w => !pool.includes(w))
+        .sort((a,b) => b.totalScore - a.totalScore)
+        .slice(0, 8 - pool.length);
+      pool = pool.concat(extra);
+    }
+
+    // Urutkan pool by totalScore
+    pool.sort((a,b) => b.totalScore - a.totalScore);
+
+    // ROTASI hasil tiap request supaya beda tiap refresh
+    const shift = Math.floor(Math.random() * pool.length);
+    const rotated = pool.slice(shift).concat(pool.slice(0, shift));
+    const result = rotated.slice(0, 8);
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error getCBFbyWisata:', err);
+    res.status(500).json({ message: 'Error fetch recommendation', error: err.message });
+  }
 };

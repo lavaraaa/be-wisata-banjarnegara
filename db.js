@@ -1,6 +1,6 @@
-const mysql = require('mysql2');
+const mysql = require('mysql2/promise');
 
-const connection = mysql.createConnection({
+const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -8,15 +8,22 @@ const connection = mysql.createConnection({
   port: process.env.DB_PORT || 3306,
   ssl: {
     rejectUnauthorized: false   // WAJIB: Aiven + Vercel
-  }
+  },
+  waitForConnections: true,
+  connectionLimit: 10,        // Max 10 koneksi concurrent
+  queueLimit: 0,              // Unlimited queue
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0
 });
 
-connection.connect((err) => {
-  if (err) {
-    console.error('Koneksi database gagal:', err);
-    return;
-  }
-  console.log('Terhubung ke database MySQL Aiven!');
-});
+// Test connection
+pool.getConnection()
+  .then(conn => {
+    console.log('✅ Database pool connected to MySQL Aiven!');
+    conn.release();
+  })
+  .catch(err => {
+    console.error('❌ Database pool connection failed:', err);
+  });
 
-module.exports = connection;
+module.exports = pool;

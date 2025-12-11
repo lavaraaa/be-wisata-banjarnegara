@@ -49,18 +49,30 @@ exports.getHybrid = async (req, res) => {
     // 5. Filter >0 dan urutkan
     let pool = combined.filter(w => w.hybridScore > 0).sort((a,b) => b.hybridScore - a.hybridScore);
 
-    // 6. Rotasi tiap 2–3 refresh
-    if (!global.hybridState) global.hybridState = {};
+    // 6. Rotasi tiap 2–3 refresh - WITH MEMORY LEAK FIX
+    if (!global.hybridState) {
+      global.hybridState = new Map();
+      global.hybridStateMaxSize = 100; // max 100 users
+    }
+
+    // Cleanup old entries if exceeds max size
+    if (global.hybridState.size > global.hybridStateMaxSize) {
+      const firstKey = global.hybridState.keys().next().value;
+      global.hybridState.delete(firstKey);
+    }
+
     const stateKey = `hybrid_${userId || 0}`;
-    if (!global.hybridState[stateKey]) global.hybridState[stateKey] = { shift: 0, count: 0 };
-    let { shift, count } = global.hybridState[stateKey];
+    if (!global.hybridState.has(stateKey)) {
+      global.hybridState.set(stateKey, { shift: 0, count: 0 });
+    }
+
+    let { shift, count } = global.hybridState.get(stateKey);
     count++;
     if (count > 2) {
       count = 0;
       shift = (shift + 3) % pool.length;
     }
-    global.hybridState[stateKey].shift = shift;
-    global.hybridState[stateKey].count = count;
+    global.hybridState.set(stateKey, { shift, count });
 
     // 7. Ambil 8 wisata teratas
     const rotated = pool.slice(shift).concat(pool.slice(0, shift));

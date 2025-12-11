@@ -5,58 +5,53 @@ exports.getCF = async (req, res) => {
   if (!userId) userId = 0;
 
   try {
-    // 1. Ambil semua wisata + like, favorit, average rating
-    const sqlAll = `
-      SELECT 
+    // OPTIMIZED QUERY - Single query instead of multiple
+    const sql = `
+      SELECT
         w.*,
-        (SELECT COUNT(*) FROM likes l WHERE l.wisata_id = w.id) AS total_likes,
-        (SELECT COUNT(*) FROM favorit f WHERE f.wisata_id = w.id) AS total_favorit,
-        (SELECT COALESCE(AVG(r.rating),0) FROM rating r WHERE r.wisata_id = w.id) AS average_rating
+        COALESCE(likes_count, 0) AS total_likes,
+        COALESCE(favorit_count, 0) AS total_favorit,
+        COALESCE(avg_rating, 0) AS average_rating,
+        (COALESCE(rating_sum, 0) + COALESCE(likes_count, 0) + COALESCE(favorit_count, 0)) AS cfScore
       FROM wisata w
+      LEFT JOIN (
+        SELECT wisata_id, SUM(rating) as rating_sum, COUNT(*) as rating_count
+        FROM rating
+        ${userId != 0 ? 'WHERE user_id != ?' : ''}
+        GROUP BY wisata_id
+      ) r ON w.id = r.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as likes_count FROM likes GROUP BY wisata_id
+      ) l ON w.id = l.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as favorit_count FROM favorit GROUP BY wisata_id
+      ) f ON w.id = f.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, AVG(rating) as avg_rating FROM rating GROUP BY wisata_id
+      ) ar ON w.id = ar.wisata_id
+      HAVING cfScore > 0
+      ORDER BY cfScore DESC
+      LIMIT 24
     `;
-    const allWisata = await new Promise((resolve, reject) => {
-      db.query(sqlAll, (err, results) => err ? reject(err) : resolve(results));
-    });
 
-    // 2. Ambil rating semua user selain user ini
-    const sqlRatings = userId != 0 
-      ? `SELECT * FROM rating WHERE user_id != ?`
-      : `SELECT * FROM rating`;
-    const ratings = await new Promise((resolve, reject) => {
-      db.query(sqlRatings, userId != 0 ? [userId] : [], (err, results) => err ? reject(err) : resolve(results));
-    });
+    const [results] = userId != 0
+      ? await db.query(sql, [userId])
+      : await db.query(sql);
 
-    // 3. Hitung CF score
-    const scoredWisata = allWisata.map(w => {
-      const wisataRatings = ratings.filter(r => r.wisata_id === w.id);
-      const ratingScore = wisataRatings.reduce((sum,r) => sum + r.rating, 0);
-      const totalLikes = w.total_likes || 0;
-      const totalFavorit = w.total_favorit || 0;
-      const cfScore = ratingScore + totalLikes + totalFavorit;
-      return { ...w, cfScore };
-    });
+    if (results.length === 0) {
+      return res.json([]);
+    }
 
-    // 4. Filter yang cfScore > 0
-    const positiveScore = scoredWisata.filter(w => w.cfScore > 0);
+    // Shuffle pool untuk tampil ke FE
+    const shuffledPool = [...results].sort(() => 0.5 - Math.random());
 
-    if (!positiveScore.length) return res.json([]); // kalau ga ada yang >0, kosong
-
-    // 5. Urut dari tertinggi untuk memilih top 24
-    const sorted = positiveScore.sort((a,b) => b.cfScore - a.cfScore || b.id - a.id);
-
-    // 6. Ambil pool: max 24 atau semua kalau <24
-    const pool = sorted.length > 24 ? sorted.slice(0,24) : sorted;
-
-    // 7. Acak pool untuk tampil ke FE
-    const shuffledPool = [...pool].sort(() => 0.5 - Math.random());
-
-    // 8. Ambil 8 untuk FE
-    const result = shuffledPool.slice(0,8);
+    // Ambil 8 untuk FE
+    const result = shuffledPool.slice(0, 8);
 
     res.json(result);
 
   } catch (err) {
-    console.error('Gagal fetch CF:', err);
-    res.status(500).json({ message: 'Error fetch CF' });
+    console.error('Error fetch CF:', err);
+    res.status(500).json({ message: 'Error fetch CF', error: err.message });
   }
 };

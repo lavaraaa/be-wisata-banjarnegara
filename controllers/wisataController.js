@@ -3,92 +3,100 @@ const supabase = require('../supabase'); // koneksi Supabase
 
 // 🟢 POST wisata
 exports.tambahWisata = async (req, res) => {
-  const {
-    judul, deskripsi, alamat, jam_buka, jam_tutup,
-    no_telepon, harga_tiket, link_gmaps, kategori,
-    longitude, latitude, kode_wilayah,
-  } = req.body;
-
-  let fasilitas = [];
   try {
-    fasilitas = req.body.fasilitas ? JSON.parse(req.body.fasilitas) : [];
-  } catch (err) {
-    return res.status(400).json({ message: 'Fasilitas bukan JSON' });
-  }
+    const {
+      judul, deskripsi, alamat, jam_buka, jam_tutup,
+      no_telepon, harga_tiket, link_gmaps, kategori,
+      longitude, latitude, kode_wilayah,
+    } = req.body;
 
-  // Upload gambar utama ke Supabase
-  let gambar = null;
-  if (req.files?.gambar?.[0]) {
-    const file = req.files.gambar[0];
-    const fileName = `${Date.now()}-${file.originalname}`;
-    const { error } = await supabase.storage
-      .from('images')
-      .upload(`utama/${fileName}`, file.buffer, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: file.mimetype,
-      });
-    if (error) return res.status(500).json({ message: 'Gagal upload gambar utama', error });
-    gambar = `utama/${fileName}`;
-  }
+    let fasilitas = [];
+    try {
+      fasilitas = req.body.fasilitas ? JSON.parse(req.body.fasilitas) : [];
+    } catch (err) {
+      return res.status(400).json({ message: 'Fasilitas bukan JSON' });
+    }
 
-  // Upload galeri ke Supabase
-  const galeri = [];
-  if (req.files?.galeri) {
-    for (const file of req.files.galeri) {
+    // Upload gambar utama ke Supabase
+    let gambar = null;
+    if (req.files?.gambar?.[0]) {
+      const file = req.files.gambar[0];
       const fileName = `${Date.now()}-${file.originalname}`;
       const { error } = await supabase.storage
         .from('images')
-        .upload(`galeri/${fileName}`, file.buffer, {
+        .upload(`utama/${fileName}`, file.buffer, {
           cacheControl: '3600',
           upsert: false,
           contentType: file.mimetype,
         });
-      if (error) return res.status(500).json({ message: 'Gagal upload galeri', error });
-      galeri.push(`galeri/${fileName}`);
+      if (error) return res.status(500).json({ message: 'Gagal upload gambar utama', error });
+      gambar = `utama/${fileName}`;
     }
-  }
 
-  const sql = `
-    INSERT INTO wisata (
+    // Upload galeri ke Supabase
+    const galeri = [];
+    if (req.files?.galeri) {
+      for (const file of req.files.galeri) {
+        const fileName = `${Date.now()}-${file.originalname}`;
+        const { error } = await supabase.storage
+          .from('images')
+          .upload(`galeri/${fileName}`, file.buffer, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType: file.mimetype,
+          });
+        if (error) return res.status(500).json({ message: 'Gagal upload galeri', error });
+        galeri.push(`galeri/${fileName}`);
+      }
+    }
+
+    const sql = `
+      INSERT INTO wisata (
+        judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
+        no_telepon, harga_tiket, link_gmaps, kategori, fasilitas, galeri,
+        longitude, latitude, kode_wilayah
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    await db.query(sql, [
       judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
-      no_telepon, harga_tiket, link_gmaps, kategori, fasilitas, galeri, 
+      no_telepon, harga_tiket, link_gmaps, kategori,
+      JSON.stringify(fasilitas), JSON.stringify(galeri),
       longitude, latitude, kode_wilayah
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-  db.query(sql, [
-    judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
-    no_telepon, harga_tiket, link_gmaps, kategori,
-    JSON.stringify(fasilitas), JSON.stringify(galeri),
-    longitude, latitude, kode_wilayah
-  ], (err) => {
-    if (err) return res.status(500).json({ message: 'Gagal tambah wisata', err });
+    ]);
+
     res.status(200).json({ message: 'Wisata berhasil ditambahkan' });
-  });
+  } catch (err) {
+    console.error('Error tambah wisata:', err);
+    res.status(500).json({ message: 'Gagal tambah wisata', error: err.message });
+  }
 };
 
 // 🟢 EDIT wisata
 exports.editWisata = async (req, res) => {
-  const { id } = req.params;
-  const {
-    judul, deskripsi, alamat, jam_buka, jam_tutup,
-    no_telepon, harga_tiket, link_gmaps, kategori,
-    fasilitas, galeri_lama, event, longitude, latitude, kode_wilayah
-  } = req.body;
-
-  let finalFasilitas = [], finalKategori = [], galeriLamaArray = [];
   try {
-    finalFasilitas = JSON.parse(fasilitas || '[]');
-    finalKategori = JSON.parse(kategori || '[]');
-    galeriLamaArray = JSON.parse(galeri_lama || '[]'); // galeri yang dipertahankan
-  } catch (e) {
-    return res.status(400).json({ message: 'Format JSON tidak valid' });
-  }
+    const { id } = req.params;
+    const {
+      judul, deskripsi, alamat, jam_buka, jam_tutup,
+      no_telepon, harga_tiket, link_gmaps, kategori,
+      fasilitas, galeri_lama, event, longitude, latitude, kode_wilayah
+    } = req.body;
 
-  // Ambil data lama dari DB
-  db.query('SELECT * FROM wisata WHERE id = ?', [id], async (err, results) => {
-    if (err || results.length === 0)
-      return res.status(500).json({ message: 'Gagal ambil data lama' });
+    let finalFasilitas = [], finalKategori = [], galeriLamaArray = [];
+    try {
+      finalFasilitas = JSON.parse(fasilitas || '[]');
+      finalKategori = JSON.parse(kategori || '[]');
+      galeriLamaArray = JSON.parse(galeri_lama || '[]'); // galeri yang dipertahankan
+    } catch (e) {
+      return res.status(400).json({ message: 'Format JSON tidak valid' });
+    }
+
+    // Ambil data lama dari DB
+    const [results] = await db.query('SELECT * FROM wisata WHERE id = ?', [id]);
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: 'Wisata tidak ditemukan' });
+    }
 
     const old = results[0];
 
@@ -170,116 +178,144 @@ exports.editWisata = async (req, res) => {
       WHERE id = ?
     `;
 
-    db.query(sqlUpdate, [
+    await db.query(sqlUpdate, [
       judul, finalGambar, deskripsi, alamat, jam_buka, jam_tutup,
       no_telepon, harga_tiket, link_gmaps,
       JSON.stringify(finalKategori),
       JSON.stringify(finalFasilitas),
       JSON.stringify(finalGaleri),
       event, longitude, latitude, kode_wilayah, id
-    ], (err2) => {
-      if (err2)
-        return res.status(500).json({ message: 'Gagal update wisata', err: err2 });
+    ]);
 
-      res.status(200).json({ message: 'Berhasil update wisata' });
-    });
-  });
+    res.status(200).json({ message: 'Berhasil update wisata' });
+  } catch (err) {
+    console.error('Error edit wisata:', err);
+    res.status(500).json({ message: 'Gagal update wisata', error: err.message });
+  }
 };
 
 // 🟢 DELETE wisata
 exports.deleteWisata = async (req, res) => {
-  const { id } = req.params;
-  // ambil data dulu
-  db.query('SELECT gambar, galeri FROM wisata WHERE id = ?', [id], async (err, results) => {
-    if (err || results.length === 0) return res.status(500).json({ message: 'Gagal ambil data' });
-    const { gambar, galeri } = results[0];
+  const connection = await db.getConnection();
+  try {
+    const { id } = req.params;
 
-    // hapus gambar utama
-    if (gambar) await supabase.storage.from('images').remove([gambar]);
+    await connection.beginTransaction();
 
-    // hapus galeri
-    if (galeri) {
-      const galeriArray = JSON.parse(galeri);
-      if (galeriArray.length > 0) await supabase.storage.from('images').remove(galeriArray);
+    // Ambil data dulu
+    const [results] = await connection.query(
+      'SELECT gambar, galeri FROM wisata WHERE id = ?',
+      [id]
+    );
+
+    if (results.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Wisata tidak ditemukan' });
     }
 
-    // hapus data DB
-    db.query('DELETE FROM wisata WHERE id = ?', [id], (err2) => {
-      if (err2) return res.status(500).json({ message: 'Gagal menghapus wisata', err: err2 });
-      res.status(200).json({ message: 'Wisata berhasil dihapus' });
-    });
-  });
+    const { gambar, galeri } = results[0];
+
+    // Hapus data dari database first
+    await connection.query('DELETE FROM wisata WHERE id = ?', [id]);
+
+    // Commit transaction
+    await connection.commit();
+
+    // Delete files AFTER successful DB delete (di luar transaction)
+    if (gambar) {
+      await supabase.storage.from('images').remove([gambar]);
+    }
+
+    if (galeri) {
+      const galeriArray = JSON.parse(galeri);
+      if (galeriArray.length > 0) {
+        await supabase.storage.from('images').remove(galeriArray);
+      }
+    }
+
+    res.status(200).json({ message: 'Wisata berhasil dihapus' });
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error delete wisata:', err);
+    res.status(500).json({ message: 'Gagal menghapus wisata', error: err.message });
+  } finally {
+    connection.release();
+  }
 };
 
-// 🟢 GET semua wisata
-exports.getAllWisata = (req, res) => {
-  const sql = `
-    SELECT 
-      w.*, 
-      (
-        SELECT COUNT(*) 
-        FROM likes l 
-        WHERE l.wisata_id = w.id
-      ) AS total_likes,
-      (
-        SELECT COUNT(*) 
-        FROM favorit l 
-        WHERE l.wisata_id = w.id
-      ) AS total_favorit,
-      (
-        SELECT COALESCE(AVG(r.rating), 0)
-        FROM rating r
-        WHERE r.wisata_id = w.id
-      ) AS average_rating
-    FROM wisata w
-  `;
+// 🟢 GET semua wisata - OPTIMIZED QUERY
+exports.getAllWisata = async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        w.*,
+        COALESCE(l.total_likes, 0) AS total_likes,
+        COALESCE(f.total_favorit, 0) AS total_favorit,
+        COALESCE(r.average_rating, 0) AS average_rating
+      FROM wisata w
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_likes
+        FROM likes
+        GROUP BY wisata_id
+      ) l ON w.id = l.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, COUNT(*) as total_favorit
+        FROM favorit
+        GROUP BY wisata_id
+      ) f ON w.id = f.wisata_id
+      LEFT JOIN (
+        SELECT wisata_id, AVG(rating) as average_rating
+        FROM rating
+        GROUP BY wisata_id
+      ) r ON w.id = r.wisata_id
+    `;
 
-  db.query(sql, (err, result) => {
-    if (err)
-      return res.status(500).json({ message: 'Gagal mengambil data wisata', error: err });
+    const [result] = await db.query(sql);
     res.json(result);
-  });
+  } catch (err) {
+    console.error('Error get all wisata:', err);
+    res.status(500).json({ message: 'Gagal mengambil data wisata', error: err.message });
+  }
 };
 
 // 🟢 GET wisata by ID
-exports.getWisataById = (req, res) => {
-  const { id } = req.params;
-  if (isNaN(id)) {
-    return res.status(400).json({ message: 'ID tidak valid' });
-  }
+exports.getWisataById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
-  const sql = 'SELECT * FROM wisata WHERE id = ?';
-  db.query(sql, [id], (err, results) => {
-    if (err) {
-      console.error('Gagal mengambil detail wisata:', err);
-      return res.status(500).json({ message: 'Gagal mengambil detail wisata' });
+    if (isNaN(id)) {
+      return res.status(400).json({ message: 'ID tidak valid' });
     }
+
+    const sql = 'SELECT * FROM wisata WHERE id = ?';
+    const [results] = await db.query(sql, [id]);
 
     if (results.length === 0) {
       return res.status(404).json({ message: 'Wisata tidak ditemukan' });
     }
 
     res.status(200).json(results[0]);
-  });
+  } catch (err) {
+    console.error('Error get wisata by id:', err);
+    res.status(500).json({ message: 'Gagal mengambil detail wisata', error: err.message });
+  }
 };
 
+exports.updateEvent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { event } = req.body;
 
-exports.updateEvent = (req, res) => {
-  const { id } = req.params;
-  const { event } = req.body;
-
-  if (event === undefined) {
-    return res.status(400).json({ message: 'Field event wajib dikirim' });
-  }
-
-  const sql = `UPDATE wisata SET event = ? WHERE id = ?`;
-
-  db.query(sql, [event, id], (err, result) => {
-    if (err) {
-      console.error('Gagal update event:', err);
-      return res.status(500).json({ message: 'Gagal update event' });
+    if (event === undefined) {
+      return res.status(400).json({ message: 'Field event wajib dikirim' });
     }
 
-    return res.status(200).json({ message: 'Event berhasil diupdate' });
-  });
+    const sql = `UPDATE wisata SET event = ? WHERE id = ?`;
+    await db.query(sql, [event, id]);
+
+    res.status(200).json({ message: 'Event berhasil diupdate' });
+  } catch (err) {
+    console.error('Error update event:', err);
+    res.status(500).json({ message: 'Gagal update event', error: err.message });
+  }
 };
