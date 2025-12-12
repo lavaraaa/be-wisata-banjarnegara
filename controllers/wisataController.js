@@ -31,6 +31,20 @@ const syncToVectorDB = async (wisataData) => {
   return response.json();
 };
 
+const deleteFromVectorDB = async (id) => {
+  const response = await fetch(VECTOR_DB_URL, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [String(id)] })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vector DB delete failed: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
 // 🟢 POST wisata
 exports.tambahWisata = async (req, res) => {
   try {
@@ -263,17 +277,28 @@ exports.deleteWisata = async (req, res) => {
     // Commit transaction
     await connection.commit();
 
-    // Delete files AFTER successful DB delete (di luar transaction)
+    // Delete files and Vector DB AFTER successful DB delete (di luar transaction)
+    const cleanupPromises = [];
+
+    // Delete from Vector DB
+    cleanupPromises.push(
+      deleteFromVectorDB(id).catch(err => console.error('Vector DB delete error:', err))
+    );
+
+    // Delete gambar utama
     if (gambar) {
-      await supabase.storage.from('images').remove([gambar]);
+      cleanupPromises.push(supabase.storage.from('images').remove([gambar]));
     }
 
+    // Delete galeri
     if (galeri) {
       const galeriArray = JSON.parse(galeri);
       if (galeriArray.length > 0) {
-        await supabase.storage.from('images').remove(galeriArray);
+        cleanupPromises.push(supabase.storage.from('images').remove(galeriArray));
       }
     }
+
+    await Promise.all(cleanupPromises);
 
     res.status(200).json({ message: 'Wisata berhasil dihapus' });
   } catch (err) {
