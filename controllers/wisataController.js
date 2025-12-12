@@ -1,6 +1,36 @@
 const db = require('../db');
 const supabase = require('../supabase'); // koneksi Supabase
 
+// Helper function untuk sync ke Vector DB
+const VECTOR_DB_URL = 'https://be-express-wisata-banjarnegara-production.up.railway.app/tourism/documents';
+
+const syncToVectorDB = async (wisataData) => {
+  const { id, judul, deskripsi, latitude, longitude, kode_wilayah } = wisataData;
+
+  const body = {
+    ids: [String(id)],
+    documents: [`${deskripsi}`],
+    metadatas: [{
+      title: judul,
+      kode_wilayah: kode_wilayah || '',
+      latitude: parseFloat(latitude) || 0,
+      longitude: parseFloat(longitude) || 0
+    }]
+  };
+
+  const response = await fetch(VECTOR_DB_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Vector DB sync failed: ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
 // 🟢 POST wisata
 exports.tambahWisata = async (req, res) => {
   try {
@@ -58,12 +88,18 @@ exports.tambahWisata = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    await db.query(sql, [
+    const [result] = await db.query(sql, [
       judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
       no_telepon, harga_tiket, link_gmaps, kategori,
       JSON.stringify(fasilitas), JSON.stringify(galeri),
       longitude, latitude, kode_wilayah
     ]);
+
+    // Sync ke vector DB (fire-and-forget, tidak blocking response)
+    syncToVectorDB({
+      id: result.insertId,
+      judul, deskripsi, latitude, longitude, kode_wilayah
+    }).catch(err => console.error('Vector DB sync error:', err));
 
     res.status(200).json({ message: 'Wisata berhasil ditambahkan' });
   } catch (err) {
@@ -178,13 +214,19 @@ exports.editWisata = async (req, res) => {
       WHERE id = ?
     `;
 
-    await db.query(sqlUpdate, [
-      judul, finalGambar, deskripsi, alamat, jam_buka, jam_tutup,
-      no_telepon, harga_tiket, link_gmaps,
-      JSON.stringify(finalKategori),
-      JSON.stringify(finalFasilitas),
-      JSON.stringify(finalGaleri),
-      event, longitude, latitude, kode_wilayah, id
+    // Gunakan Promise.all untuk UPDATE DB dan sync vector DB secara paralel
+    await Promise.all([
+      db.query(sqlUpdate, [
+        judul, finalGambar, deskripsi, alamat, jam_buka, jam_tutup,
+        no_telepon, harga_tiket, link_gmaps,
+        JSON.stringify(finalKategori),
+        JSON.stringify(finalFasilitas),
+        JSON.stringify(finalGaleri),
+        event, longitude, latitude, kode_wilayah, id
+      ]),
+      syncToVectorDB({
+        id, judul, deskripsi, latitude, longitude, kode_wilayah
+      }).catch(err => console.error('Vector DB sync error:', err))
     ]);
 
     res.status(200).json({ message: 'Berhasil update wisata' });
