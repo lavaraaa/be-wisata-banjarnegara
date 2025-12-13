@@ -5,11 +5,32 @@ const supabase = require('../supabase'); // koneksi Supabase
 const VECTOR_DB_URL = 'https://be-express-wisata-banjarnegara-production.up.railway.app/tourism/documents';
 
 const syncToVectorDB = async (wisataData) => {
-  const { id, judul, deskripsi, latitude, longitude, kode_wilayah } = wisataData;
+  const {
+    id, judul, deskripsi, alamat, jam_buka, jam_tutup,
+    no_telepon, harga_tiket, kategori, fasilitas,
+    latitude, longitude, kode_wilayah
+  } = wisataData;
+
+  // Format kategori dan fasilitas jika array
+  const kategoriStr = Array.isArray(kategori) ? kategori.join(', ') : (kategori || '-');
+  const fasilitasStr = Array.isArray(fasilitas) ? fasilitas.join(', ') : (fasilitas || '-');
+
+  // Buat dokumen lengkap dengan semua informasi wisata
+  const document = [
+    `Judul: ${judul || '-'}`,
+    `Deskripsi: ${deskripsi || '-'}`,
+    `Alamat: ${alamat || '-'}`,
+    `Jam Buka: ${jam_buka || '-'}`,
+    `Jam Tutup: ${jam_tutup || '-'}`,
+    `No. Telepon: ${no_telepon || '-'}`,
+    `Harga Tiket: ${harga_tiket || '-'}`,
+    `Kategori: ${kategoriStr}`,
+    `Fasilitas: ${fasilitasStr}`
+  ].join('\n');
 
   const body = {
     ids: [String(id)],
-    documents: [`${deskripsi}`],
+    documents: [document],
     metadatas: [{
       title: judul,
       kode_wilayah: kode_wilayah || '',
@@ -112,7 +133,9 @@ exports.tambahWisata = async (req, res) => {
     // Sync ke vector DB (fire-and-forget, tidak blocking response)
     syncToVectorDB({
       id: result.insertId,
-      judul, deskripsi, latitude, longitude, kode_wilayah
+      judul, deskripsi, alamat, jam_buka, jam_tutup,
+      no_telepon, harga_tiket, kategori, fasilitas,
+      latitude, longitude, kode_wilayah
     }).catch(err => console.error('Vector DB sync error:', err));
 
     res.status(200).json({ message: 'Wisata berhasil ditambahkan' });
@@ -239,7 +262,10 @@ exports.editWisata = async (req, res) => {
         event, longitude, latitude, kode_wilayah, id
       ]),
       syncToVectorDB({
-        id, judul, deskripsi, latitude, longitude, kode_wilayah
+        id, judul, deskripsi, alamat, jam_buka, jam_tutup,
+        no_telepon, harga_tiket,
+        kategori: finalKategori, fasilitas: finalFasilitas,
+        latitude, longitude, kode_wilayah
       }).catch(err => console.error('Vector DB sync error:', err))
     ]);
 
