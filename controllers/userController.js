@@ -3,7 +3,7 @@ const db = require('../db');
 // Ambil hanya user dengan role 'user'
 exports.getAllUsers = async (req, res) => {
   try {
-    const sql = 'SELECT id, username, email, photoURL FROM users WHERE role = "user"';
+    const sql = "SELECT id, username, email, photoURL FROM users WHERE role = 'user'";
     const [results] = await db.query(sql);
 
     console.log('✅ Data user dengan role user:', results);
@@ -30,7 +30,7 @@ exports.deleteUser = async (req, res) => {
 exports.getUserById = async (req, res) => {
   try {
     const userId = req.params.id;
-    const query = 'SELECT id, username, email, photoURL FROM users WHERE id = ? AND role = "user"';
+      const query = "SELECT id, username, email, photoURL FROM users WHERE id = ? AND role = 'user'";
     const [result] = await db.query(query, [userId]);
 
     if (result.length === 0) {
