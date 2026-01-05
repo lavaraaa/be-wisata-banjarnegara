@@ -152,7 +152,7 @@ exports.editWisata = async (req, res) => {
     const {
       judul, deskripsi, alamat, jam_buka, jam_tutup,
       no_telepon, harga_tiket, link_gmaps, kategori,
-      fasilitas, galeri_lama, longitude, latitude, kode_wilayah
+      fasilitas, galeri_lama, event, longitude, latitude, kode_wilayah
     } = req.body;
 
     let finalFasilitas = [], finalKategori = [], galeriLamaArray = [];
@@ -259,7 +259,7 @@ exports.editWisata = async (req, res) => {
         JSON.stringify(finalKategori),
         JSON.stringify(finalFasilitas),
         JSON.stringify(finalGaleri),
-        longitude, latitude, kode_wilayah, id
+        event, longitude, latitude, kode_wilayah, id
       ]),
       syncToVectorDB({
         id, judul, deskripsi, alamat, jam_buka, jam_tutup,
@@ -394,21 +394,21 @@ exports.getWisataById = async (req, res) => {
   }
 };
 
-// exports.updateEvent = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { event } = req.body;
+exports.updateEvent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { event } = req.body;
 
-//     if (event === undefined) {
-//       return res.status(400).json({ message: 'Field event wajib dikirim' });
-//     }
+    if (event === undefined) {
+      return res.status(400).json({ message: 'Field event wajib dikirim' });
+    }
 
-//     const sql = `UPDATE wisata SET event = ? WHERE id = ?`;
-//     await db.query(sql, [event, id]);
+    const sql = `UPDATE wisata SET event = ? WHERE id = ?`;
+    await db.query(sql, [event, id]);
 
-//     res.status(200).json({ message: 'Event berhasil diupdate' });
-//   } catch (err) {
-//     console.error('Error update event:', err);
-//     res.status(500).json({ message: 'Gagal update event', error: err.message });
-//   }
-// };
+    res.status(200).json({ message: 'Event berhasil diupdate' });
+  } catch (err) {
+    console.error('Error update event:', err);
+    res.status(500).json({ message: 'Gagal update event', error: err.message });
+  }
+};
