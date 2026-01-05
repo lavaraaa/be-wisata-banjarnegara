@@ -14,7 +14,7 @@ exports.laporkanKomentar = async (req, res) => {
     const [result] = await db.query(checkQuery, [komentar_id, userId]);
 
     if (result.length > 0) {
-      return res.status(400).json({ message: 'Kamu sudah melaporkan komentar ini' });
+      return res.status(400).json({ message: 'Komentar sudah dilaporkan' });
     }
 
     const insertQuery = `
