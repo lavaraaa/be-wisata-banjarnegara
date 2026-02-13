@@ -1,0 +1,415 @@
+openapi: 3.0.3
+info:
+  title: Category Admin API
+  version: 1.0.0
+  description: |
+    OpenAPI documentation for category endpoints under `/api/admin/kategori`.
+    These endpoints require JWT authentication and admin role.
+
+servers:
+  - url: https://your-domain.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local
+
+tags:
+  - name: Category Admin
+    description: CRUD operations for tourism category master data.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/admin/kategori:
+    post:
+      tags:
+        - Category Admin
+      summary: Create category
+      description: Create a new category in `kategori_wisata`.
+      operationId: createKategori
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKategoriRequest'
+            examples:
+              default:
+                value:
+                  nama: Wisata Alam
+      responses:
+        '201':
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateKategoriResponse'
+              examples:
+                success:
+                  value:
+                    message: Kategori berhasil ditambahkan.
+                    data:
+                      id: 12
+                      nama: Wisata Alam
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                namaRequired:
+                  value:
+                    message: Nama kategori wajib diisi.
+        '403':
+          description: Forbidden (non-admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                forbidden:
+                  value:
+                    message: Hanya admin yang dapat mengakses data kategori.
+        '409':
+          description: Conflict (duplicate category name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                duplicate:
+                  value:
+                    message: Kategori sudah ada.
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorWithDetailResponse'
+              examples:
+                internal:
+                  value:
+                    message: Gagal menambah kategori
+                    error: Internal error detail
+
+    get:
+      tags:
+        - Category Admin
+      summary: Get all categories
+      description: Get all category rows from `kategori_wisata`, ordered by `nama` ascending.
+      operationId: getAllKategori
+      responses:
+        '200':
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Kategori'
+              examples:
+                success:
+                  value:
+                    - id: 1
+                      nama: Wisata Alam
+                      created_at: '2026-02-13T10:00:00.000Z'
+                    - id: 2
+                      nama: Desa Wisata
+                      created_at: '2026-02-13T10:02:00.000Z'
+        '403':
+          description: Forbidden (non-admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                forbidden:
+                  value:
+                    message: Hanya admin yang dapat mengakses data kategori.
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorWithDetailResponse'
+              examples:
+                internal:
+                  value:
+                    message: Gagal mengambil data kategori
+                    error: Internal error detail
+
+  /api/admin/kategori/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Category ID
+        schema:
+          type: integer
+          minimum: 1
+
+    put:
+      tags:
+        - Category Admin
+      summary: Update category
+      description: Update category name by ID.
+      operationId: updateKategori
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKategoriRequest'
+            examples:
+              default:
+                value:
+                  nama: Wisata Alam & Curug
+      responses:
+        '200':
+          description: Category updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateKategoriResponse'
+              examples:
+                success:
+                  value:
+                    message: Kategori berhasil diubah.
+                    data:
+                      id: 1
+                      nama: Wisata Alam & Curug
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidId:
+                  value:
+                    message: ID kategori tidak valid.
+                namaRequired:
+                  value:
+                    message: Nama kategori wajib diisi.
+        '403':
+          description: Forbidden (non-admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                forbidden:
+                  value:
+                    message: Hanya admin yang dapat mengakses data kategori.
+        '404':
+          description: Category not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  value:
+                    message: Kategori tidak ditemukan.
+        '409':
+          description: Conflict (name already used)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                nameUsed:
+                  value:
+                    message: Nama kategori sudah digunakan.
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorWithDetailResponse'
+              examples:
+                internal:
+                  value:
+                    message: Gagal mengubah kategori
+                    error: Internal error detail
+
+    delete:
+      tags:
+        - Category Admin
+      summary: Delete category
+      description: Delete category by ID. Deletion is blocked if category is still used by tourism data.
+      operationId: deleteKategori
+      responses:
+        '200':
+          description: Category deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              examples:
+                success:
+                  value:
+                    message: Kategori berhasil dihapus.
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidId:
+                  value:
+                    message: ID kategori tidak valid.
+        '403':
+          description: Forbidden (non-admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                forbidden:
+                  value:
+                    message: Hanya admin yang dapat mengakses data kategori.
+        '404':
+          description: Category not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  value:
+                    message: Kategori tidak ditemukan.
+        '409':
+          description: Conflict (category still used)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                categoryInUse:
+                  value:
+                    message: Kategori masih digunakan oleh data wisata dan tidak dapat dihapus.
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorWithDetailResponse'
+              examples:
+                internal:
+                  value:
+                    message: Gagal menghapus kategori
+                    error: Internal error detail
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Kategori:
+      type: object
+      required:
+        - id
+        - nama
+        - created_at
+      properties:
+        id:
+          type: integer
+          example: 1
+        nama:
+          type: string
+          example: Wisata Alam
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-02-13T10:00:00.000Z'
+
+    CreateKategoriRequest:
+      type: object
+      required:
+        - nama
+      properties:
+        nama:
+          type: string
+          example: Wisata Alam
+
+    UpdateKategoriRequest:
+      type: object
+      required:
+        - nama
+      properties:
+        nama:
+          type: string
+          example: Wisata Alam & Curug
+
+    KategoriData:
+      type: object
+      required:
+        - id
+        - nama
+      properties:
+        id:
+          type: integer
+          example: 1
+        nama:
+          type: string
+          example: Wisata Alam
+
+    CreateKategoriResponse:
+      type: object
+      required:
+        - message
+        - data
+      properties:
+        message:
+          type: string
+          example: Kategori berhasil ditambahkan.
+        data:
+          $ref: '#/components/schemas/KategoriData'
+
+    UpdateKategoriResponse:
+      type: object
+      required:
+        - message
+        - data
+      properties:
+        message:
+          type: string
+          example: Kategori berhasil diubah.
+        data:
+          $ref: '#/components/schemas/KategoriData'
+
+    MessageResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: Kategori berhasil dihapus.
+
+    ErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: Kategori tidak ditemukan.
+
+    ErrorWithDetailResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: Gagal mengambil data kategori
+        error:
+          type: string
+          example: Internal error detail
