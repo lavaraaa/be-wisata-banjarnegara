@@ -66,8 +66,86 @@ const deleteFromVectorDB = async (id) => {
   return response.json();
 };
 
+const normalizeKategoriList = (rawKategori) => {
+  if (rawKategori === undefined || rawKategori === null || rawKategori === '') {
+    return [];
+  }
+
+  let parsed = rawKategori;
+  if (typeof rawKategori === 'string') {
+    try {
+      parsed = JSON.parse(rawKategori);
+    } catch {
+      parsed = rawKategori;
+    }
+  }
+
+  if (Array.isArray(parsed)) {
+    const seen = new Set();
+    const normalized = [];
+
+    for (const value of parsed) {
+      const item = String(value).trim();
+      const itemKey = item.toLowerCase();
+
+      if (!item || seen.has(itemKey)) continue;
+
+      seen.add(itemKey);
+      normalized.push(item);
+    }
+
+    return normalized;
+  }
+
+  const singleValue = String(parsed).trim();
+  return singleValue ? [singleValue] : [];
+};
+
+const parseKategoriFromAggregate = (kategoriList) => {
+  if (!kategoriList) return [];
+
+  return kategoriList
+    .split('||')
+    .map((value) => value.trim())
+    .filter(Boolean);
+};
+
+const resolveKategoriIds = async (connection, kategoriList = []) => {
+  if (kategoriList.length === 0) {
+    return { kategoriIds: [], missingKategori: [] };
+  }
+
+  const lowerKategoriList = kategoriList.map((item) => item.toLowerCase());
+  const [rows] = await connection.query(
+    'SELECT id, nama FROM kategori_wisata WHERE LOWER(nama) IN (?)',
+    [lowerKategoriList]
+  );
+
+  const kategoriMap = new Map(rows.map((row) => [row.nama.toLowerCase(), row.id]));
+  const missingKategori = kategoriList.filter((item) => !kategoriMap.has(item.toLowerCase()));
+  const kategoriIds = kategoriList.map((item) => kategoriMap.get(item.toLowerCase())).filter(Boolean);
+
+  return { kategoriIds, missingKategori };
+};
+
+const replaceWisataKategori = async (connection, wisataId, kategoriIds = []) => {
+  await connection.query('DELETE FROM wisata_kategori WHERE wisata_id = ?', [wisataId]);
+
+  if (kategoriIds.length === 0) return;
+
+  const placeholders = kategoriIds.map(() => '(?, ?)').join(', ');
+  const params = kategoriIds.flatMap((kategoriId) => [wisataId, kategoriId]);
+
+  await connection.query(
+    `INSERT INTO wisata_kategori (wisata_id, kategori_id) VALUES ${placeholders}`,
+    params
+  );
+};
+
 // 🟢 POST wisata
 exports.tambahWisata = async (req, res) => {
+  const connection = await db.getConnection();
+  let isTransactionStarted = false;
   try {
     const {
       judul, deskripsi, alamat, jam_buka, jam_tutup,
@@ -75,11 +153,21 @@ exports.tambahWisata = async (req, res) => {
       longitude, latitude, kode_wilayah,
     } = req.body;
 
+    const finalKategori = normalizeKategoriList(kategori);
+
     let fasilitas = [];
     try {
       fasilitas = req.body.fasilitas ? JSON.parse(req.body.fasilitas) : [];
     } catch (err) {
       return res.status(400).json({ message: 'Fasilitas bukan JSON' });
+    }
+
+    const { kategoriIds, missingKategori } = await resolveKategoriIds(connection, finalKategori);
+    if (missingKategori.length > 0) {
+      return res.status(400).json({
+        message: 'Kategori tidak ditemukan. Tambahkan kategori terlebih dahulu lewat endpoint admin.',
+        missing_kategori: missingKategori
+      });
     }
 
     // Upload gambar utama ke Supabase
@@ -115,6 +203,9 @@ exports.tambahWisata = async (req, res) => {
       }
     }
 
+    await connection.beginTransaction();
+    isTransactionStarted = true;
+
     const sql = `
       INSERT INTO wisata (
         judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
@@ -123,30 +214,40 @@ exports.tambahWisata = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    const [result] = await db.query(sql, [
+    const [result] = await connection.query(sql, [
       judul, gambar, deskripsi, alamat, jam_buka, jam_tutup,
-      no_telepon, harga_tiket, link_gmaps, kategori,
+      no_telepon, harga_tiket, link_gmaps, JSON.stringify(finalKategori),
       JSON.stringify(fasilitas), JSON.stringify(galeri),
       longitude, latitude, kode_wilayah
     ]);
+
+    await replaceWisataKategori(connection, result.insertId, kategoriIds);
+    await connection.commit();
 
     // Sync ke vector DB (fire-and-forget, tidak blocking response)
     syncToVectorDB({
       id: result.insertId,
       judul, deskripsi, alamat, jam_buka, jam_tutup,
-      no_telepon, harga_tiket, kategori, fasilitas,
+      no_telepon, harga_tiket, kategori: finalKategori, fasilitas,
       latitude, longitude, kode_wilayah
     }).catch(err => console.error('Vector DB sync error:', err));
 
     res.status(200).json({ message: 'Wisata berhasil ditambahkan' });
   } catch (err) {
+    if (isTransactionStarted) {
+      await connection.rollback();
+    }
     console.error('Error tambah wisata:', err);
     res.status(500).json({ message: 'Gagal tambah wisata', error: err.message });
+  } finally {
+    connection.release();
   }
 };
 
 // 🟢 EDIT wisata
 exports.editWisata = async (req, res) => {
+  const connection = await db.getConnection();
+  let isTransactionStarted = false;
   try {
     const { id } = req.params;
     const {
@@ -155,17 +256,25 @@ exports.editWisata = async (req, res) => {
       fasilitas, galeri_lama, event, longitude, latitude, kode_wilayah
     } = req.body;
 
-    let finalFasilitas = [], finalKategori = [], galeriLamaArray = [];
+    let finalFasilitas = [], galeriLamaArray = [];
     try {
       finalFasilitas = JSON.parse(fasilitas || '[]');
-      finalKategori = JSON.parse(kategori || '[]');
       galeriLamaArray = JSON.parse(galeri_lama || '[]'); // galeri yang dipertahankan
     } catch (e) {
       return res.status(400).json({ message: 'Format JSON tidak valid' });
     }
 
+    const finalKategori = normalizeKategoriList(kategori);
+    const { kategoriIds, missingKategori } = await resolveKategoriIds(connection, finalKategori);
+    if (missingKategori.length > 0) {
+      return res.status(400).json({
+        message: 'Kategori tidak ditemukan. Tambahkan kategori terlebih dahulu lewat endpoint admin.',
+        missing_kategori: missingKategori
+      });
+    }
+
     // Ambil data lama dari DB
-    const [results] = await db.query('SELECT * FROM wisata WHERE id = ?', [id]);
+    const [results] = await connection.query('SELECT * FROM wisata WHERE id = ?', [id]);
 
     if (results.length === 0) {
       return res.status(404).json({ message: 'Wisata tidak ditemukan' });
@@ -251,28 +360,38 @@ exports.editWisata = async (req, res) => {
       WHERE id = ?
     `;
 
-    // Gunakan Promise.all untuk UPDATE DB dan sync vector DB secara paralel
-    await Promise.all([
-      db.query(sqlUpdate, [
-        judul, finalGambar, deskripsi, alamat, jam_buka, jam_tutup,
-        no_telepon, harga_tiket, link_gmaps,
-        JSON.stringify(finalKategori),
-        JSON.stringify(finalFasilitas),
-        JSON.stringify(finalGaleri),
-        event, longitude, latitude, kode_wilayah, id
-      ]),
-      syncToVectorDB({
-        id, judul, deskripsi, alamat, jam_buka, jam_tutup,
-        no_telepon, harga_tiket,
-        kategori: finalKategori, fasilitas: finalFasilitas,
-        latitude, longitude, kode_wilayah
-      }).catch(err => console.error('Vector DB sync error:', err))
+    await connection.beginTransaction();
+    isTransactionStarted = true;
+
+    await connection.query(sqlUpdate, [
+      judul, finalGambar, deskripsi, alamat, jam_buka, jam_tutup,
+      no_telepon, harga_tiket, link_gmaps,
+      JSON.stringify(finalKategori),
+      JSON.stringify(finalFasilitas),
+      JSON.stringify(finalGaleri),
+      event, longitude, latitude, kode_wilayah, id
     ]);
+
+    await replaceWisataKategori(connection, Number(id), kategoriIds);
+    await connection.commit();
+    isTransactionStarted = false;
+
+    syncToVectorDB({
+      id, judul, deskripsi, alamat, jam_buka, jam_tutup,
+      no_telepon, harga_tiket,
+      kategori: finalKategori, fasilitas: finalFasilitas,
+      latitude, longitude, kode_wilayah
+    }).catch(err => console.error('Vector DB sync error:', err));
 
     res.status(200).json({ message: 'Berhasil update wisata' });
   } catch (err) {
+    if (isTransactionStarted) {
+      await connection.rollback();
+    }
     console.error('Error edit wisata:', err);
     res.status(500).json({ message: 'Gagal update wisata', error: err.message });
+  } finally {
+    connection.release();
   }
 };
 
@@ -344,7 +463,8 @@ exports.getAllWisata = async (req, res) => {
         w.*,
         COALESCE(l.total_likes, 0) AS total_likes,
         COALESCE(f.total_favorit, 0) AS total_favorit,
-        COALESCE(r.average_rating, 0) AS average_rating
+        COALESCE(r.average_rating, 0) AS average_rating,
+        k.kategori_list
       FROM wisata w
       LEFT JOIN (
         SELECT wisata_id, COUNT(*) as total_likes
@@ -361,10 +481,31 @@ exports.getAllWisata = async (req, res) => {
         FROM rating
         GROUP BY wisata_id
       ) r ON w.id = r.wisata_id
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_list
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
     `;
 
     const [result] = await db.query(sql);
-    res.json(result);
+    const formattedResult = result.map((row) => {
+      const { kategori_list, ...restRow } = row;
+      const kategoriFromRelasi = parseKategoriFromAggregate(row.kategori_list);
+      const kategori = kategoriFromRelasi.length > 0
+        ? kategoriFromRelasi
+        : normalizeKategoriList(row.kategori);
+
+      return {
+        ...restRow,
+        kategori
+      };
+    });
+
+    res.json(formattedResult);
   } catch (err) {
     console.error('Error get all wisata:', err);
     res.status(500).json({ message: 'Gagal mengambil data wisata', error: err.message });
@@ -380,14 +521,38 @@ exports.getWisataById = async (req, res) => {
       return res.status(400).json({ message: 'ID tidak valid' });
     }
 
-    const sql = 'SELECT * FROM wisata WHERE id = ?';
+    const sql = `
+      SELECT
+        w.*,
+        k.kategori_list
+      FROM wisata w
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_list
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
+      WHERE w.id = ?
+    `;
     const [results] = await db.query(sql, [id]);
 
     if (results.length === 0) {
       return res.status(404).json({ message: 'Wisata tidak ditemukan' });
     }
 
-    res.status(200).json(results[0]);
+    const wisata = results[0];
+    const { kategori_list, ...restWisata } = wisata;
+    const kategoriFromRelasi = parseKategoriFromAggregate(wisata.kategori_list);
+    const kategori = kategoriFromRelasi.length > 0
+      ? kategoriFromRelasi
+      : normalizeKategoriList(wisata.kategori);
+
+    res.status(200).json({
+      ...restWisata,
+      kategori
+    });
   } catch (err) {
     console.error('Error get wisata by id:', err);
     res.status(500).json({ message: 'Gagal mengambil detail wisata', error: err.message });

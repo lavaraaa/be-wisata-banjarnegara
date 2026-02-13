@@ -21,6 +21,12 @@ const normalizeKategori = (k) => {
 const parseKategori = (kategori) => {
   if (!kategori) return [];
   if (Array.isArray(kategori)) return kategori.map(k => normalizeKategori(k));
+  if (typeof kategori === 'string' && kategori.includes('||')) {
+    return kategori
+      .split('||')
+      .map((k) => normalizeKategori(k))
+      .filter(Boolean);
+  }
   try {
     return JSON.parse(kategori).map(k => normalizeKategori(k));
   } catch {
@@ -42,7 +48,8 @@ exports.getCBFbyWisata = async (req, res) => {
         w.*,
         COALESCE(l.total_likes, 0) AS total_likes,
         COALESCE(f.total_favorit, 0) AS total_favorit,
-        COALESCE(r.avg_rating, 0) AS avg_rating
+        COALESCE(r.avg_rating, 0) AS avg_rating,
+        COALESCE(k.kategori_relasi, '') AS kategori_relasi
       FROM wisata w
       LEFT JOIN (
         SELECT wisata_id, COUNT(*) as total_likes FROM likes GROUP BY wisata_id
@@ -53,13 +60,35 @@ exports.getCBFbyWisata = async (req, res) => {
       LEFT JOIN (
         SELECT wisata_id, AVG(rating) as avg_rating FROM rating GROUP BY wisata_id
       ) r ON w.id = r.wisata_id
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_relasi
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
       WHERE w.id != ?
     `;
 
     const [allWisata] = await db.query(sqlAll, [wisataId]);
 
     // Ambil referensi wisata
-    const sqlRef = `SELECT * FROM wisata WHERE id = ?`;
+    const sqlRef = `
+      SELECT
+        w.*,
+        COALESCE(k.kategori_relasi, '') AS kategori_relasi
+      FROM wisata w
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_relasi
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
+      WHERE w.id = ?
+    `;
     const [refRows] = await db.query(sqlRef, [wisataId]);
 
     if (!refRows.length) {
@@ -67,12 +96,12 @@ exports.getCBFbyWisata = async (req, res) => {
     }
 
     const refWisata = refRows[0];
-    const refKategori = parseKategori(refWisata.kategori);
+    const refKategori = parseKategori(refWisata.kategori_relasi || refWisata.kategori);
     const refJudulWords = normalizeWords(refWisata.judul);
 
     // Hitung skor kemiripan + popularity
     const scored = allWisata.map(w => {
-      const wKategori = parseKategori(w.kategori);
+      const wKategori = parseKategori(w.kategori_relasi || w.kategori);
       const wJudulWords = normalizeWords(w.judul);
 
       const judulSim = wJudulWords.filter(word => refJudulWords.includes(word)).length;

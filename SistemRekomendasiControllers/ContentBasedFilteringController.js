@@ -20,6 +20,12 @@ const normalizeKategori = (k) => {
 const parseKategori = (kategori) => {
   if (!kategori) return [];
   if (Array.isArray(kategori)) return kategori.map(k => normalizeKategori(k));
+  if (typeof kategori === 'string' && kategori.includes('||')) {
+    return kategori
+      .split('||')
+      .map((k) => normalizeKategori(k))
+      .filter(Boolean);
+  }
   try {
     return JSON.parse(kategori).map(k => normalizeKategori(k));
   } catch {
@@ -38,7 +44,8 @@ exports.getCBF = async (req, res) => {
         COALESCE(l.total_likes, 0) AS total_likes,
         COALESCE(f.total_favorit, 0) AS total_favorit,
         COALESCE(r.average_rating, 0) AS average_rating,
-        ur.rating AS user_rating
+        ur.rating AS user_rating,
+        COALESCE(k.kategori_relasi, '') AS kategori_relasi
       FROM wisata w
       LEFT JOIN (
         SELECT wisata_id, COUNT(*) as total_likes FROM likes GROUP BY wisata_id
@@ -52,15 +59,33 @@ exports.getCBF = async (req, res) => {
       LEFT JOIN (
         SELECT wisata_id, rating FROM rating WHERE user_id = ?
       ) ur ON w.id = ur.wisata_id
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_relasi
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
     `;
 
     const [allWisata] = await db.query(sqlAll, [userId]);
 
     // Ambil history user rating >=4
     const sqlHistory = `
-      SELECT w.*
+      SELECT
+        w.*,
+        COALESCE(k.kategori_relasi, '') AS kategori_relasi
       FROM rating r
       JOIN wisata w ON r.wisata_id = w.id
+      LEFT JOIN (
+        SELECT
+          wk.wisata_id,
+          GROUP_CONCAT(DISTINCT kw.nama ORDER BY kw.nama SEPARATOR '||') AS kategori_relasi
+        FROM wisata_kategori wk
+        JOIN kategori_wisata kw ON wk.kategori_id = kw.id
+        GROUP BY wk.wisata_id
+      ) k ON w.id = k.wisata_id
       WHERE r.user_id = ? AND r.rating >= 4
       ORDER BY r.rating DESC, r.created_at DESC
     `;
@@ -80,12 +105,12 @@ exports.getCBF = async (req, res) => {
     }
 
     // parse kategori user history
-    const userHistoryKategori = userHistory.map(h => parseKategori(h.kategori));
+    const userHistoryKategori = userHistory.map(h => parseKategori(h.kategori_relasi || h.kategori));
 
     // Hitung skor wisata
     let scoredWisata = allWisata.map(w => {
       let cbfScore = 0;
-      const wKategori = parseKategori(w.kategori);
+      const wKategori = parseKategori(w.kategori_relasi || w.kategori);
 
       // cek judul → dominan
       const wJudul = (w.judul || '').toLowerCase().split(' ');

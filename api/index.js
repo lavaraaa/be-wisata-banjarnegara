@@ -10,6 +10,7 @@ const userActionRoutes = require('../routes/userActionRoutes');
 const ratingRoutes = require('../routes/ratingRoutes');
 const komentarRoutes = require('../routes/komentarRoutes');
 const laporanKomentarRoutes = require('../routes/laporanKomentarRoutes');
+const kategoriRoutes = require('../routes/kategoriRoutes');
 const sistemRekomendasiRoutes = require('../SistemRekomendasiRoutes/SistemRekomendasiRoutes');
 
 const app = express();
@@ -25,6 +26,7 @@ app.use('/api', userActionRoutes);
 app.use('/api', ratingRoutes);
 app.use('/api', komentarRoutes);
 app.use('/api', laporanKomentarRoutes);
+app.use('/api', kategoriRoutes);
 app.use('/api/rekomendasi', sistemRekomendasiRoutes);
 
 module.exports = (req, res) => {
