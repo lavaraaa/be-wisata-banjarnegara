@@ -1,0 +1,96 @@
+openapi: 3.0.3
+info:
+  title: Category Public API
+  version: 1.0.0
+  description: |
+    OpenAPI documentation for the public category endpoint at `/api/kategori`.
+    This endpoint does **not** require authentication.
+
+servers:
+  - url: https://your-domain.com
+    description: Production
+  - url: http://localhost:3000
+    description: Local
+
+tags:
+  - name: Category Public
+    description: Public read-only access to tourism categories.
+
+paths:
+  /api/kategori:
+    get:
+      tags:
+        - Category Public
+      summary: Get all categories (public)
+      description: |
+        Returns all tourism categories from `kategori_wisata`, ordered by `nama` ascending.
+        No authentication is required.
+      operationId: getPublicKategori
+      security: []
+      responses:
+        '200':
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Kategori'
+              examples:
+                success:
+                  value:
+                    - id: 1
+                      nama: Desa Wisata
+                      created_at: '2026-02-13T10:00:00.000Z'
+                    - id: 2
+                      nama: Wisata Alam
+                      created_at: '2026-02-13T10:02:00.000Z'
+                    - id: 3
+                      nama: Wisata Budaya
+                      created_at: '2026-02-13T10:05:00.000Z'
+                empty:
+                  summary: No categories exist yet
+                  value: []
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorWithDetailResponse'
+              examples:
+                internal:
+                  value:
+                    message: Gagal mengambil data kategori
+                    error: Internal error detail
+
+components:
+  schemas:
+    Kategori:
+      type: object
+      required:
+        - id
+        - nama
+        - created_at
+      properties:
+        id:
+          type: integer
+          example: 1
+        nama:
+          type: string
+          example: Wisata Alam
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-02-13T10:00:00.000Z'
+
+    ErrorWithDetailResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: Gagal mengambil data kategori
+        error:
+          type: string
+          example: Internal error detail

@@ -62,6 +62,19 @@ exports.getAllKategori = async (req, res) => {
   }
 };
 
+exports.getPublicKategori = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, nama, created_at FROM kategori_wisata ORDER BY nama ASC'
+    );
+
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('Error get public kategori:', err);
+    res.status(500).json({ message: 'Gagal mengambil data kategori', error: err.message });
+  }
+};
+
 exports.updateKategori = async (req, res) => {
   try {
     if (!ensureAdmin(req, res)) return;
