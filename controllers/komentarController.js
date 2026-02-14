@@ -81,7 +81,8 @@ exports.getKomentarByWisata = async (req, res) => {
              u.username, u.email, u.photoURL
       FROM komentar k
       JOIN users u ON k.user_id = u.id
-      WHERE k.wisata_id = ?
+      LEFT JOIN laporan_komentar lk ON k.id = lk.komentar_id
+      WHERE k.wisata_id = ? AND lk.id IS NULL
       ORDER BY k.created_at DESC
     `;
 
